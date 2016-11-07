@@ -1,21 +1,32 @@
 import mysql.connector
 
 
-class BankRecordsAquisition(object):
+class DatabaseClient(object):
     def __init__(self):
-        self.contractors_handler = ContractorsHandler()
-
-    def aquire(self, bank_record):
-        self.contractors_handler.handle_bank_record(bank_record)
-
-
-class DatabaseTableHandler(object):
-    def __init__(self, table_name):
         self.cnx = mysql.connector.connect(user='root', host='localhost', database='finances', password='kasa')
-        self.table_name = table_name
+        self.contractors_table_name = 'contractors'
 
-    def handle_bank_record(self, bank_record):
-        raise NotImplementedError
+    def add_contractor(self, contractor_info):
+        add_contractor_query = \
+            ("INSERT INTO {} "
+             "(contractor_name) "
+             "VALUES (%(contractor_name)s)".format(self.contractors_table_name))
+        try:
+            self._insert_into_table(add_contractor_query, contractor_info)
+        except mysql.connector.errors.IntegrityError as e:
+            if e.errno == 1062:
+                print "Contractor with name {} is present in contractors table. Will not duplicate database entry.".format(
+                    contractor_info['contractor_name'])
+
+    def _get_contractor_id(self, contractor_name):
+
+        contractor_id_query = \
+            ("SELECT contractor_id FROM contractors WHERE contractor_name = %s"
+             )
+        cursor = self.cnx.cursor()
+        cursor.execute(contractor_id_query, (contractor_name,))
+        contractor_id = [contractor_id for contractor_id in cursor][0]
+        return contractor_id
 
     def _insert_into_table(self, add_query, add_data):
         """
@@ -28,69 +39,40 @@ class DatabaseTableHandler(object):
         cursor.close()
 
 
-class ContractorsHandler(DatabaseTableHandler):
-    def __init__(self):
-        super(ContractorsHandler, self).__init__('contractors')
-
-    def handle_bank_record(self, bank_record):
-        """
-        :type bank_record:
-        """
-        contractor_record = ContractorRecord(bank_record)
-        self._add_to_database(contractor_record)
-        contractor_id = self._get_contractor_id(contractor_record['contractor_name'])
-        return contractor_id
-
-    def _add_to_database(self, contractor_record):
-        add_contractor = \
-            ("INSERT INTO {} "
-             "(contractor_name) "
-             "VALUES (%(contractor_name)s)".format(self.table_name))
-        try:
-            self._insert_into_table(add_contractor, contractor_record)
-        except mysql.connector.errors.IntegrityError as e:
-            if e.errno == 1062:
-                print "Contractor with name {} is present in contractors table. Will not duplicate database entry.".format(
-                    contractor_record['contractor_name'])
-
-    def _get_contractor_id(self, contractor_name):
-
-        contractor_id_query = \
-            ("SELECT contractor_id FROM contractors WHERE contractor_name = %s"
-             )
-        cursor = self.cnx.cursor()
-        cursor.execute(contractor_id_query, (contractor_name,))
-        contractor_id = [contractor_id for contractor_id in cursor][0]
-        return contractor_id
-
-
-class BankRecord(dict):
-    def __init__(self, operator, transaction_date, contractor_name, transaction_title, transaction_type, transaction_id,
-                 amount, currency, balance_after_transaction):
-        super(BankRecord, self).__init__(
+class TransactionInfo(dict):
+    def __init__(self, operator, transaction_date, amount):
+        super(TransactionInfo, self).__init__(
             operator=operator,
             transaction_date=transaction_date,
-            contractor_name=contractor_name,
-            transaction_title=transaction_title,
-            transaction_type=transaction_type,
-            transaction_id=transaction_id,
-            amount=amount,
-            currency=currency,
-            balance_after_transaction=balance_after_transaction
+            amount=amount
         )
 
 
-class TransactionRecord(dict):
-    def __init__(self, bank_record):
-        super(TransactionRecord, self).__init__(
-            operator=bank_record.operator,
-            transaction_date=bank_record.transaction_date,
-            amount=bank_record.amount
+class ContractorInfo(dict):
+    def __init__(self, contractor_name):
+        super(ContractorInfo, self).__init__(
+            contractor_name=contractor_name
         )
 
+class SingleRecordsAccumulator(object):
+    def __init__(self):
+        self.database_client = DatabaseClient()
+    def accumulate(self, ing_record):
+        """
 
-class ContractorRecord(dict):
-    def __init__(self, bank_record):
-        super(ContractorRecord, self).__init__(
-            contractor_name=bank_record['contractor_name']
-        )
+        :param ing_record:
+        :return:
+        """
+        contractor_info = ing_record.formContractorInfo()
+        self.database_client.add_contractor(contractor_info)
+
+def accumulate_records(ing_records):
+    """
+    Method for accumulating info from the list of ing_records to database.
+
+    :param ing_records: list of IngCsvRecord instances
+    :type ing_records: list[IngCsvRecord]
+    """
+    single_records_accumulator = SingleRecordsAccumulator()
+    for ing_record in ing_records:
+        single_records_accumulator.accumulate(ing_record)
